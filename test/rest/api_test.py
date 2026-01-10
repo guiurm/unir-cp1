@@ -1,6 +1,7 @@
 import http.client
 import os
 import unittest
+from urllib.error import HTTPError
 from urllib.request import urlopen
 
 import pytest
@@ -53,16 +54,28 @@ class TestApi(unittest.TestCase):
         )
         self.assertEqual(
             response.read().decode(), "4.0", "ERROR DIVIDE"
-        )    
+        )
 
     def test_api_divide_by_zero(self):
         url = f"{BASE_URL}/calc/divide/10/0"
-        try:
-            response = urlopen(url, timeout=DEFAULT_TIMEOUT)
-            self.fail("Se esperaba un error HTTP 406")
-        except HTTPError as e:
-            self.assertEqual(e.code, 406, "ERROR: División por cero debe retornar 406")
-            self.assertEqual(e.read().decode(), "ERROR DIVIDE/0")    
+        
+        # Intentamos hacer la petición que debe fallar
+        with self.assertRaises(HTTPError) as context:
+            urlopen(url, timeout=DEFAULT_TIMEOUT)
+        
+        # Verificamos el código de error
+        self.assertEqual(
+            context.exception.code, 
+            406, 
+            "ERROR: División por cero debe retornar HTTP 406"
+        )
+        
+        # Verificamos el mensaje de error
+        self.assertEqual(
+            context.exception.read().decode(), 
+            "ERROR DIVIDE/0",
+            "ERROR: El mensaje de error no es el esperado"
+        )    
 
 
 '''
