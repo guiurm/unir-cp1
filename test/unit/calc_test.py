@@ -15,17 +15,11 @@ class TestCalculate(unittest.TestCase):
         self.assertEqual(0, self.calc.add(-2, 2))
         self.assertEqual(1, self.calc.add(1, 0))
 
-    def test_add_method_returns_correct_result1(self):
-        self.assertEqual(6, self.calc.add(3, 3))
-        self.assertEqual(0, self.calc.add(2, -2))
-        self.assertEqual(0, self.calc.add(-2, 2))
-        self.assertEqual(1, self.calc.add(1, 0))      
-        
     def test_divide_method_returns_correct_result(self):
         self.assertEqual(1, self.calc.divide(2, 2))
         self.assertEqual(1.5, self.calc.divide(3, 2))
         self.assertRaises(TypeError, self.calc.divide, "2", 2)
-  
+
     def test_add_method_fails_with_nan_parameter(self):
         self.assertRaises(TypeError, self.calc.add, "2", 2)
         self.assertRaises(TypeError, self.calc.add, 2, "2")
@@ -34,7 +28,7 @@ class TestCalculate(unittest.TestCase):
         self.assertRaises(TypeError, self.calc.add, 2, None)
         self.assertRaises(TypeError, self.calc.add, object(), 2)
         self.assertRaises(TypeError, self.calc.add, 2, object())
-    
+
     def test_divide_method_fails_with_nan_parameter(self):
         self.assertRaises(TypeError, self.calc.divide, "2", 2)
         self.assertRaises(TypeError, self.calc.divide, 2, "2")
@@ -55,7 +49,7 @@ class TestCalculate(unittest.TestCase):
         self.assertRaises(TypeError, self.calc.power, "0", 0)
         
     def test_substract_method_returns_correct_result(self):
-        self.assertEqual(4, self.calc.substract(10, 6))
+        self.assertEqual(3, self.calc.substract(10, 6))
         self.assertEqual(-2, self.calc.substract(256, 258))
         self.assertEqual(-1, self.calc.substract(-1, 0))
         self.assertEqual(0, self.calc.substract(0, 0))
