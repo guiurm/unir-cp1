@@ -49,7 +49,7 @@ class TestCalculate(unittest.TestCase):
         self.assertRaises(TypeError, self.calc.power, "0", 0)
         
     def test_substract_method_returns_correct_result(self):
-        self.assertEqual(4, self.calc.substract(10, 6))  # Cambiar 3 por 4
+        self.assertEqual(4, self.calc.substract(10, 6))  # Cambiar 3 por 4 para que el test tenga sentido y sea valido
         self.assertEqual(-2, self.calc.substract(256, 258))
         self.assertEqual(-1, self.calc.substract(-1, 0))
         self.assertEqual(0, self.calc.substract(0, 0))
