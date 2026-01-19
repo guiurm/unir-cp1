@@ -1,0 +1,286 @@
+pipeline {
+    agent none
+    options { skipDefaultCheckout() }
+
+    stages {
+        stage('Get Code') {
+            agent { label 'host' }
+            steps {
+                git branch: 'master', url: 'https://github.com/guiurm/unir-cp1.git'
+                sh '''#!/bin/bash
+                    printf "\n===== NODE INFO (GET CODE) =====\n"
+                    printf " User: %s\n" "$(whoami)"
+                    printf " Host: %s\n" "$(hostname)"
+                    printf " Workspace: %s\n" "${WORKSPACE}"
+                    printf "=================================\n\n"
+                '''
+                stash name: 'code', includes: '**'
+            }
+        }
+
+        stage('Tests & Analysis (parallel)') {
+            parallel {
+                stage('Unit') {
+                    agent { label 'jenkins-agent-01' }
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            unstash 'code'
+                            sh '''#!/bin/bash
+                                printf "\n===== NODE INFO (UNIT) =====\n"
+                                printf " User: %s\n" "$(whoami)"
+                                printf " Host: %s\n" "$(hostname)"
+                                printf " Workspace: %s\n" "${WORKSPACE}"
+                                printf "=============================\n\n"
+                                
+                                echo "=== Ejecutando tests unitarios ==="
+                                export PYTHONPATH=${WORKSPACE}
+                                python3 -m pytest --junitxml=result-unit.xml test/unit -v
+                            '''
+                            junit 'result-unit.xml'
+                        }
+                    }
+                }
+
+                stage('Rest') {
+                    agent { label 'jenkins-agent-02' }
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            unstash 'code'
+                            sh '''#!/bin/bash
+                                printf "\n===== NODE INFO (REST) =====\n"
+                                printf " User: %s\n" "$(whoami)"
+                                printf " Host: %s\n" "$(hostname)"
+                                printf " Workspace: %s\n" "${WORKSPACE}"
+                                printf "============================\n\n"
+                                
+                                set +e
+
+                                export FLASK_APP=app/api.py
+                                export PYTHONPATH=${WORKSPACE}
+
+                                echo "=== Descargando WireMock si es necesario ==="
+                                if [ ! -f wiremock.jar ]; then
+                                    wget -q https://repo1.maven.org/maven2/com/github/tomakehurst/wiremock-jre8-standalone/2.28.0/wiremock-jre8-standalone-2.28.0.jar -O wiremock.jar
+                                fi
+
+                                echo "=== Iniciando Flask ==="
+                                flask run --host=127.0.0.1 --port=5000 > flask.log 2>&1 &
+                                FLASK_PID=$!
+
+                                echo "=== Iniciando WireMock ==="
+                                java -jar wiremock.jar --port 9090 --root-dir test/wiremock > wiremock.log 2>&1 &
+                                WIREMOCK_PID=$!
+
+                                echo "=== Esperando Flask (max 30s) ==="
+                                for i in {1..30}; do
+                                    if curl -s http://127.0.0.1:5000 > /dev/null 2>&1; then
+                                        echo "✓ Flask está listo"
+                                        break
+                                    fi
+                                    if [ $i -eq 30 ]; then
+                                        echo "✗ Flask no respondió a tiempo"
+                                        cat flask.log
+                                        kill $FLASK_PID $WIREMOCK_PID 2>/dev/null
+                                        exit 1
+                                    fi
+                                    sleep 1
+                                done
+
+                                echo "=== Esperando WireMock (max 30s) ==="
+                                for i in {1..30}; do
+                                    if curl -s http://127.0.0.1:9090/__admin > /dev/null 2>&1; then
+                                        echo "✓ WireMock está listo"
+                                        break
+                                    fi
+                                    if [ $i -eq 30 ]; then
+                                        echo "✗ WireMock no respondió a tiempo"
+                                        cat wiremock.log
+                                        kill $FLASK_PID $WIREMOCK_PID 2>/dev/null
+                                        exit 1
+                                    fi
+                                    sleep 1
+                                done
+
+                                echo "=== Ejecutando tests de integración ==="
+                                python3 -m pytest --junitxml=result-rest.xml test/rest -v
+                                TEST_EXIT=$?
+
+                                echo "=== Deteniendo servicios ==="
+                                kill $FLASK_PID $WIREMOCK_PID 2>/dev/null || true
+                                sleep 2
+                                pkill -f flask 2>/dev/null || true
+                                pkill -f wiremock 2>/dev/null || true
+
+                                exit $TEST_EXIT
+                            '''
+                            junit 'result-rest.xml'
+                        }
+                    }
+                }
+
+                stage('Static') {
+                    agent { label 'jenkins-agent-01' }
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            unstash 'code'
+                            sh '''#!/bin/bash
+                                printf "\n===== NODE INFO (STATIC) =====\n"
+                                printf " User: %s\n" "$(whoami)"
+                                printf " Host: %s\n" "$(hostname)"
+                                printf " Workspace: %s\n" "${WORKSPACE}"
+                                printf "==============================\n\n"
+                                
+                                echo "=== Ejecutando análisis estático con flake8 ==="
+                                python3 -m flake8 --exit-zero --format=pylint app > flake8.out
+                                cat flake8.out
+                            '''
+                            recordIssues(
+                                tools: [flake8(pattern: 'flake8.out')],
+                                qualityGates: [
+                                    [threshold: 8, type: 'TOTAL', unstable: true],
+                                    [threshold: 10, type: 'TOTAL', unstable: false]
+                                ],
+                                enabledForFailure: true
+                            )
+                        }
+                    }
+                }
+
+                stage('Security') {
+                    agent { label 'jenkins-agent-02' }
+                    steps {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            unstash 'code'
+                            sh '''#!/bin/bash
+                                printf "\n===== NODE INFO (SECURITY) =====\n"
+                                printf " User: %s\n" "$(whoami)"
+                                printf " Host: %s\n" "$(hostname)"
+                                printf " Workspace: %s\n" "${WORKSPACE}"
+                                printf "===============================\n\n"
+                                
+                                echo "=== Ejecutando análisis de seguridad con bandit ==="
+                                python3 -m bandit --exit-zero -r . -f custom -o bandit.out --msg-template "{abspath}:{line}: [{test_id}]{msg}"
+                                cat bandit.out
+                            '''
+                            recordIssues(
+                                tools: [pyLint(name: 'Bandit', pattern: 'bandit.out')],
+                                qualityGates: [
+                                    [threshold: 2, type: 'TOTAL', unstable: true],
+                                    [threshold: 4, type: 'TOTAL', unstable: false]
+                                ],
+                                enabledForFailure: true
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Performance') {
+            agent { label 'jenkins-agent-01' }
+            steps {
+                unstash 'code'
+                sh '''#!/bin/bash
+                    printf "\n===== NODE INFO (PERFORMANCE) =====\n"
+                    printf " User: %s\n" "$(whoami)"
+                    printf " Host: %s\n" "$(hostname)"
+                    printf " Workspace: %s\n" "${WORKSPACE}"
+                    printf "=================================\n\n"
+                    
+                    set +e
+
+                    export FLASK_APP=app/api.py
+                    export PYTHONPATH=${WORKSPACE}
+
+                    echo "=== Descargando JMeter si es necesario ==="
+                    if [ ! -d "apache-jmeter-5.6.3" ]; then
+                        wget -q https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.tgz
+                        tar -xzf apache-jmeter-5.6.3.tgz
+                    fi
+
+                    echo "=== Iniciando Flask para pruebas de rendimiento ==="
+                    flask run --host=127.0.0.1 --port=5000 > flask.log 2>&1 &
+                    FLASK_PID=$!
+
+                    echo "=== Esperando Flask (max 30s) ==="
+                    for i in {1..30}; do
+                        if curl -s http://127.0.0.1:5000 > /dev/null 2>&1; then
+                            echo "✓ Flask está listo"
+                            break
+                        fi
+                        if [ $i -eq 30 ]; then
+                            echo "✗ Flask no respondió a tiempo"
+                            cat flask.log
+                            kill $FLASK_PID 2>/dev/null
+                            exit 1
+                        fi
+                        sleep 1
+                    done
+
+                    echo "=== Ejecutando pruebas de rendimiento con JMeter ==="
+                    ./apache-jmeter-5.6.3/bin/jmeter -n -t test/jmeter/flask.jmx -l flask.jtl -j jmeter.log
+                    TEST_EXIT=$?
+
+                    echo "=== Deteniendo Flask ==="
+                    kill $FLASK_PID 2>/dev/null || true
+                    sleep 2
+                    pkill -f flask 2>/dev/null || true
+
+                    exit $TEST_EXIT
+                '''
+                perfReport sourceDataFiles: 'flask.jtl'
+            }
+        }
+
+        stage('Coverage') {
+            agent { label 'jenkins-agent-02' }
+            steps {
+                unstash 'code'
+                sh '''#!/bin/bash
+                    printf "\n===== NODE INFO (COVERAGE) =====\n"
+                    printf " User: %s\n" "$(whoami)"
+                    printf " Host: %s\n" "$(hostname)"
+                    printf " Workspace: %s\n" "${WORKSPACE}"
+                    printf "===============================\n\n"
+
+                    export PYTHONPATH=${WORKSPACE}
+
+                    echo "=== Ejecutando análisis de cobertura ==="
+                    python3 -m coverage run \
+                        --branch \
+                        --source=app \
+                        --omit=app/__init__.py,app/api.py \
+                        -m pytest test/unit
+
+                    echo "=== Generando reporte XML de cobertura ==="
+                    python3 -m coverage xml                    
+                '''
+                recordCoverage(
+                    tools: [[parser: 'COBERTURA', pattern: 'coverage.xml']],
+                    qualityGates: [
+                        [metric: 'LINE', threshold: 85.0, unstable: true],
+                        [metric: 'LINE', threshold: 95.0, unstable: false],
+                        [metric: 'BRANCH', threshold: 80.0, unstable: true],
+                        [metric: 'BRANCH', threshold: 90.0, unstable: false]
+                    ],
+                    enabledForFailure: true
+                )
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                // Limpieza del workspace en todos los nodos
+                def agents = ['host', 'jenkins-agent-01', 'jenkins-agent-02']
+                for (agent in agents) {
+                    node(agent) {
+                        echo "=== Limpiando workspace en ${agent} ==="
+                        cleanWs()
+                    }
+                }
+            }
+        }
+    }
+}
