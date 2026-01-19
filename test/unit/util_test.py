@@ -23,5 +23,19 @@ class TestUtil(unittest.TestCase):
         self.assertRaises(TypeError, util.convert_to_number, None)
         self.assertRaises(TypeError, util.convert_to_number, object())
 
+    def test_InvalidConvertToNumber_basic_functionality(self):
+        # Test básico para cobertura - misma funcionalidad que convert_to_number
+        self.assertEqual(4, util.InvalidConvertToNumber("4"))
+        self.assertAlmostEqual(4.0, util.InvalidConvertToNumber("4.0"), delta=0.0000001)
+        self.assertRaises(TypeError, util.InvalidConvertToNumber, "abc")
+
+    def test_validate_permissions_user1_allowed(self):
+        self.assertTrue(util.validate_permissions("any_operation", "user1"))
+
+    def test_validate_permissions_other_user_denied(self):
+        self.assertFalse(util.validate_permissions("any_operation", "user2"))
+        self.assertFalse(util.validate_permissions("any_operation", "admin"))
+        self.assertFalse(util.validate_permissions("any_operation", ""))
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
